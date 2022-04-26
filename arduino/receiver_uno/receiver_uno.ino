@@ -8,7 +8,7 @@
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
 const byte addresses[][6] = {"00001", "00002"};
 
-struct PanelArray{
+struct PanelStat{
   float PanelVoltage;
   float PanelAmpere;
 //  int CoveredLDR;
@@ -18,7 +18,6 @@ struct PanelArray{
 //  float EnTemperature;
 };
 
-float package[2];
 
 float Num1;
 float Num2;
@@ -34,17 +33,17 @@ void setup() {
   }
   
 void loop() {
-  struct PanelArray PA;
+  struct PanelStat PSone;
   
    radio.startListening();
 //   while (!radio.available());
 
   if(radio.available()){
-       radio.read(&PA, sizeof(PA));
+       radio.read(&PSone, sizeof(PSone));
 
    
-   Num1 = PA.PanelVoltage;
-   Num2 = PA.PanelAmpere;
+   Num1 = PSone.PanelVoltage;
+   Num2 = PSone.PanelAmpere;
    
    Serial.print("Recieved 2 numbers : ");
    Serial.print(Num1);

@@ -31,9 +31,8 @@ int sensor_value = 0;
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
 const byte addresses[][6] = {"00001", "00002"};
 
-float package[2];
 
-struct PanelArray{
+struct PanelStat{
   float PanelVoltage;
   float PanelAmpere;
 //  int CoveredLDR;
@@ -55,23 +54,23 @@ void setup() {
                                                     
 void loop() {
 
-  struct PanelArray PA;
+  struct PanelStat PSone;
 
-  PA.PanelVoltage = VoltageSensor();
-  PA.PanelAmpere = CurrentSensor();
+  PSone.PanelVoltage = VoltageSensor();
+  PSone.PanelAmpere = CurrentSensor();
 
   radio.stopListening();
   
   Serial.print("Two values sent are :");
-  Serial.print(PA.PanelVoltage);
+  Serial.print(PSone.PanelVoltage);
   Serial.print(" , ");
-  Serial.println(PA.PanelAmpere);
+  Serial.println(PSone.PanelAmpere);
   
   // Sending data
-  radio.write(&PA, sizeof(PA));
+  radio.write(&PSone, sizeof(PSone));
 
   unsigned long start_time = micros();      
-  if (!radio.write( &PA, sizeof(PA) )) {
+  if (!radio.write( &PSone, sizeof(PSone) )) {
     Serial.println(F("Failed"));
   }
 
