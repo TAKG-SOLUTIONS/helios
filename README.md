@@ -3,7 +3,7 @@
 <p>Greeting, this code was part of our university project and has now been assessed and marked. We are excited to share it with the public now.</p>
 
 
-This group consist of 6 students.
+This group consist of 6 students. [TAKG-ALPHA Group]
 
 | Name                 |
 | -------------------- |
