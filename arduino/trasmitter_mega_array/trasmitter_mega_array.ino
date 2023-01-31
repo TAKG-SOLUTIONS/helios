@@ -5,7 +5,6 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Servo.h>
-#include <MsgPack.h>
 
 
 //Volgate and Current
@@ -61,21 +60,10 @@ Servo servo;
 #define RF24_CSN_PIN 8
 
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
-const byte addresses[][6] = {"02019", "02020"};
+//const byte addresses[][6] = {"02019", "02020"};
 
 
-
-struct PanelStat{
-  int PanelVoltage;
-  int PanelAmpere;
-  int Raindrop; //En
-  int PanelLDR;
-  int PanelTemp;
-  int PanelHumi; //En
-  int Temperature; //En
-//  int DustCheckLDR;
-  MSGPACK_DEFINE(PanelVoltage, PanelAmpere,Raindrop,PanelLDR,PanelTemp,PanelHumi,Temperature);
-};
+#define array_size 7
 
 
 char responseMsg[10];
@@ -87,9 +75,8 @@ void setup() {
 //    radio.openReadingPipe(1,addresses[1]); // 00002
 
     radio.openWritingPipe(0xE8E8F0F0E1LL);
-    radio.setChannel(0x77);    
     radio.setPALevel(RF24_PA_MIN);
-    radio.enableDynamicPayloads();
+    radio.setChannel(0x77);
     
     Serial.begin(9600);
 
@@ -101,73 +88,64 @@ void setup() {
 }
                                                     
 void loop() {
-
-  struct PanelStat PSone;
   
   
-  PSone.PanelVoltage = int(VoltageSensor()*100);
-  PSone.PanelAmpere = int(CurrentSensor()*100);
-  PSone.Raindrop = RaindropSensor();
-  PSone.PanelLDR = PanelLDRSensor();
-  PSone.PanelTemp = DHTSensorTemperature();
-  PSone.PanelHumi = DHTSensorHumidity();
-  PSone.Temperature = int(DSTemperatureSensor()*100);
+  int PanelVoltage = int((VoltageSensor() * 100));
+  int PanelAmpere = int((CurrentSensor() * 100));
+  int Raindrop = RaindropSensor();
+  int PanelLDR = PanelLDRSensor();
+  int PanelTemp = DHTSensorTemperature();
+  int PanelHumi = DHTSensorHumidity();
+  int Temperature = int((DSTemperatureSensor() * 100));
+  //  float DustCheckLDR;
   
 
   radio.stopListening();
   
-  Serial.println("Panel Stat One Values are :");
-  Serial.print(PSone.PanelVoltage);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelAmpere);
-  Serial.print(" , ");
-  Serial.print(PSone.Raindrop);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelLDR);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelTemp);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelHumi);
-  Serial.print(" , ");
-  Serial.println(PSone.Temperature);
+
+  int PanelStatAOne[array_size] = {PanelVoltage,PanelAmpere,Raindrop,PanelLDR,PanelTemp,PanelHumi,Temperature};
+
+  Serial.println("Values sent are :");
+
+    for(int i = 0; i < array_size; i++){
+      Serial.print(PanelStatAOne[i]);
+      Serial.print("\t");
+  }
   
-  MsgPack::Packer packer;
-  packer.serialize(PSone);
+  Serial.println("");
+  
   
   // Sending data
-  radio.write(packer.data(), packer.size());
+  radio.write(&PanelStatAOne, sizeof(PanelStatAOne));
 
-  Serial.print("Payload Size: ");
-  Serial.println(packer.size());
-
-//  unsigned long start_time = micros();      
-//  if (! radio.write(packer.data(), packer.size())) {
-//    Serial.println(F("Failed to write data"));
-//  }
+  unsigned long start_time = micros();      
+  if (!radio.write( &PanelStatAOne, sizeof(PanelStatAOne) )) {
+    Serial.println(F("Failed to write data"));
+  }
 
   //Start listening to get data
   radio.startListening();
 
-//  unsigned long started_waiting_at = micros();               // Set up a timeout period, get the current microseconds
-//  boolean timeout = false;                                   // Set up a variable to indicate if a response was received or not
-//
-//  while ( ! radio.available() ) {                            // While nothing is received
-//    if (micros() - started_waiting_at > 200000 ) {           // If waited longer than 200ms, indicate timeout and exit while loop
-//      timeout = true;
-//      break;
-//    }
-//  }
-//
-//  if(timeout){
-//    Serial.println(F("Failed, response timed out."));
-//  }
-//  else{
-//    radio.read(&responseM, sizeof(responseM));
-//    Serial.print("Response Message :");
-//    Serial.println(responseM);
-//    Serial.print("\n");
-//    radio.stopListening();
-//  }
+  unsigned long started_waiting_at = micros();               // Set up a timeout period, get the current microseconds
+  boolean timeout = false;                                   // Set up a variable to indicate if a response was received or not
+
+  while ( ! radio.available() ) {                            // While nothing is received
+    if (micros() - started_waiting_at > 200000 ) {           // If waited longer than 200ms, indicate timeout and exit while loop
+      timeout = true;
+      break;
+    }
+  }
+
+  if(timeout){
+    Serial.println(F("Failed, response timed out."));
+  }
+  else{
+    radio.read(&responseM, sizeof(responseM));
+    Serial.print("Response Message :");
+    Serial.println(responseM);
+    Serial.print("\n");
+    radio.stopListening();
+  }
 
   
   delay(2000);

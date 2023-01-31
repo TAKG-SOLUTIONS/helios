@@ -6,11 +6,15 @@
 #include <DallasTemperature.h>
 #include <Servo.h>
 #include <MsgPack.h>
+#include <RTClib.h>
 
 
 //Volgate and Current
 #define VOLTAGE_PIN A0
 #define CURRENT_PIN A3
+
+// Init 
+RTC_DS3231 rtc;
 
 // Floats for ADC voltage & Input voltage
 float cal_voltage = 0.0;
@@ -63,81 +67,129 @@ Servo servo;
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
 const byte addresses[][6] = {"02019", "02020"};
 
+#define MAX_PANELS 128
+
+typedef struct PanelNumber {
+  int x; // Panel position x cordinate
+  int y; // y cordinate
+  MSGPACK_DEFINE(x, y);
+} PanelNumber;
 
 
-struct PanelStat{
-  int PanelVoltage;
-  int PanelAmpere;
-  int Raindrop; //En
-  int PanelLDR;
-  int PanelTemp;
-  int PanelHumi; //En
-  int Temperature; //En
-//  int DustCheckLDR;
-  MSGPACK_DEFINE(PanelVoltage, PanelAmpere,Raindrop,PanelLDR,PanelTemp,PanelHumi,Temperature);
-};
+typedef struct Panel {
+  PanelNumber id;
+  int volt;
+  int amp;
+  int ldr;
+  int temp;
+  MSGPACK_DEFINE(id, volt, amp, ldr, temp);
+} Panel;
 
 
-char responseMsg[10];
-bool responseM;
+typedef struct EnvironmentStat {
+  int temp;
+  int humid;
+  int raindop;
+  MSGPACK_DEFINE(temp, humid, raindop);
+} EnvironmentStat;
+
+
+typedef struct PanelArrayStat {
+  int session;
+  EnvironmentStat envStat;
+  MsgPack::arr_t<Panel> panels;
+  uint32_t timestamp;
+  MSGPACK_DEFINE(session, envStat, panels, timestamp);
+} PanelArrayStat;
+
 
 void setup() {
+    Serial.begin(9600);
     radio.begin();
-//    radio.openWritingPipe(addresses[0]); // 00001
-//    radio.openReadingPipe(1,addresses[1]); // 00002
+    if (! rtc.begin()) {
+      Serial.println("Couldn't find RTC");
+      while (1);
+    }
+  
+    if (rtc.lostPower()) {
+      Serial.println("RTC lost power, lets set the time!");
+      rtc.adjust(DateTime(2022, 5, 5, 15,43,0));
+    }
 
     radio.openWritingPipe(0xE8E8F0F0E1LL);
     radio.setChannel(0x77);    
     radio.setPALevel(RF24_PA_MIN);
     radio.enableDynamicPayloads();
     
-    Serial.begin(9600);
+    
 
     pinMode(rd_apin, INPUT);
     pinMode(ldr_apin, INPUT);
     pinMode(dht_dpin, INPUT);
     
     EnTempSensor.begin();
+
+  
+
+    
 }
                                                     
 void loop() {
 
-  struct PanelStat PSone;
+  PanelArrayStat stat;
+
+  PanelNumber id;
+  id.x = 0;
+  id.y = 1;
+
+  Panel p1;
+  p1.id = id;
+  p1.volt = int(VoltageSensor()*100);
+  p1.amp = int(CurrentSensor()*100);
+  p1.ldr = PanelLDRSensor();
+  p1.temp = DHTSensorTemperature();
+
+  Serial.println("Panel Stat One Values are :");
+  Serial.print(p1.volt);
+  Serial.print(" , ");
+  Serial.print(p1.amp);
+  Serial.print(" , ");
+  Serial.print(p1.ldr);
+  Serial.print(" , ");
+  Serial.print(p1.temp);
+
+  MsgPack::arr_t<Panel> panels;
+  panels.push_back(p1);
+  PanelNumber id2;
   
+  id2.x = 0;
+  id2.y = 0;
+  p1.id = id2;
   
-  PSone.PanelVoltage = int(VoltageSensor()*100);
-  PSone.PanelAmpere = int(CurrentSensor()*100);
-  PSone.Raindrop = RaindropSensor();
-  PSone.PanelLDR = PanelLDRSensor();
-  PSone.PanelTemp = DHTSensorTemperature();
-  PSone.PanelHumi = DHTSensorHumidity();
-  PSone.Temperature = int(DSTemperatureSensor()*100);
+//  panels.push_back(p1);
+
+  EnvironmentStat env;
+  env.temp = int(DSTemperatureSensor()*100);;
+  env.humid = DHTSensorHumidity();
+  env.raindop = RaindropSensor();
+
+  stat.session = 1;
+  stat.panels = panels;
+  stat.envStat  =  env;
+  DateTime now = rtc.now();
+  stat.timestamp = now.unixtime();
+  
+  radio.stopListening(); // Stop listening so that we can start writing
   
 
-  radio.stopListening();
-  
-  Serial.println("Panel Stat One Values are :");
-  Serial.print(PSone.PanelVoltage);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelAmpere);
-  Serial.print(" , ");
-  Serial.print(PSone.Raindrop);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelLDR);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelTemp);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelHumi);
-  Serial.print(" , ");
-  Serial.println(PSone.Temperature);
   
   MsgPack::Packer packer;
-  packer.serialize(PSone);
+  packer.serialize(stat);
   
   // Sending data
   radio.write(packer.data(), packer.size());
 
-  Serial.print("Payload Size: ");
+  Serial.print("\n  Payload Size: ");
   Serial.println(packer.size());
 
 //  unsigned long start_time = micros();      
@@ -169,8 +221,9 @@ void loop() {
 //    radio.stopListening();
 //  }
 
+
   
-  delay(2000);
+  delay(10000);
   }
 
 

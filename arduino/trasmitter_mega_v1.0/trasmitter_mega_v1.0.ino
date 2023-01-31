@@ -63,7 +63,43 @@ Servo servo;
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
 const byte addresses[][6] = {"02019", "02020"};
 
+#define MAX_PANELS 128
 
+typedef struct PanelNumber {
+  int x; // Panel position x cordinate
+  int y; // y cordinate
+  MSGPACK_DEFINE(x, y);
+} PanelNumber;
+
+
+typedef struct Panel {
+  PanelNumber id;
+  int volt;
+  int amp;
+  int ldr;
+  int temp;
+  MSGPACK_DEFINE(id, volt, amp, ldr, temp);
+} Panel;
+
+
+typedef struct EnvironmentStat {
+  int temp;
+  int humid;
+  MSGPACK_DEFINE(temp, humid, temp);
+} EnvironmentStat;
+
+
+typedef struct PanelArrayStat {
+  int session;
+  EnvironmentStat envStat;
+  MsgPack::arr_t<Panel> panels;
+  MSGPACK_DEFINE(session, envStat, panels);
+} PanelArrayStat;
+
+PanelArrayStat my_stat;
+Panel p1;
+p1.volt = 1;
+my_stat.panels[0] = p1;
 
 struct PanelStat{
   int PanelVoltage;
