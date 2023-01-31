@@ -131,14 +131,12 @@ void loop() {
   Serial.print(" , ");
   Serial.println(PSone.Temperature);
   
-  MsgPack::Packer packer;
-  packer.serialize(PSone);
   
   // Sending data
-  radio.write(packer.data(), packer.size());
+  radio.write(&PSone, sizeof(PSone));
 
   Serial.print("Payload Size: ");
-  Serial.println(packer.size());
+  Serial.println(sizeof(PSone));
 
 //  unsigned long start_time = micros();      
 //  if (! radio.write(packer.data(), packer.size())) {

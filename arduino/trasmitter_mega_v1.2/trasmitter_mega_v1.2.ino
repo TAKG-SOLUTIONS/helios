@@ -6,11 +6,15 @@
 #include <DallasTemperature.h>
 #include <Servo.h>
 #include <MsgPack.h>
+#include <RTClib.h>
 
 
 //Volgate and Current
 #define VOLTAGE_PIN A0
 #define CURRENT_PIN A3
+
+// Init 
+RTC_DS3231 rtc;
 
 // Floats for ADC voltage & Input voltage
 float cal_voltage = 0.0;
@@ -50,7 +54,6 @@ OneWire oneWire(en_temp_dpin);
 // Pass our oneWire reference to Dallas Temperature sensor 
 DallasTemperature EnTempSensor(&oneWire);
 
-
 // Panel dust checking LDR sensor
 #define dust_ldr_apin A1
 Servo servo;
@@ -61,83 +64,188 @@ Servo servo;
 #define RF24_CSN_PIN 8
 
 RF24 radio(RF24_CE_PIN, RF24_CSN_PIN); // CE, CSN
-const byte addresses[][6] = {"02019", "02020"};
 
+#define MAX_PANELS 128
+#define FIRMWARE_VERSION 100
+#define DEVICE_MAC 2868
 
+#define COMMAND_CONNECT 2
+#define COMMAND_DATA 3
+#define COMMAND_DATA_ENV 4
 
-struct PanelStat{
-  int PanelVoltage;
-  int PanelAmpere;
-  int Raindrop; //En
-  int PanelLDR;
-  int PanelTemp;
-  int PanelHumi; //En
-  int Temperature; //En
-//  int DustCheckLDR;
-  MSGPACK_DEFINE(PanelVoltage, PanelAmpere,Raindrop,PanelLDR,PanelTemp,PanelHumi,Temperature);
+#define COMMAND_DATA_LDR 12
+#define COMMAND_READ_LDR 13
+
+#define DEVICE_NRF_ADDRESS 0xE6E6F0F0E1LL
+#define EDGE_NRF_ADDRESS 0xE8E8F0F0E1LL
+
+struct CommandBase {
+    unsigned char command_id;
+    MSGPACK_DEFINE(command_id);
 };
 
 
-char responseMsg[10];
-bool responseM;
+typedef struct PanelNumber {
+  byte x; // Panel position x cordinate
+  byte y; // y cordinate
+  MSGPACK_DEFINE(x, y);
+} PanelNumber;
+
+
+typedef struct Panel {
+  PanelNumber id;
+  int volt;
+  int amp;
+  int ldr;
+  int temp;
+  MSGPACK_DEFINE(id, volt, amp, ldr, temp);
+} Panel;
+
+
+typedef struct EnvironmentStat {
+  int temp;
+  byte humid;
+  int raindop;
+  MSGPACK_DEFINE(temp, humid, raindop);
+} EnvironmentStat;
+
+
+typedef struct PanelArrayStat : public CommandBase {
+  byte session;
+  EnvironmentStat envStat;
+  MsgPack::arr_t<Panel> panels;
+  uint32_t timestamp;
+  MSGPACK_DEFINE(MSGPACK_BASE(CommandBase), session, envStat, panels, timestamp);
+} PanelArrayStat;
+
+
+typedef struct ConnectMsg : public CommandBase {
+  uint64_t address;
+
+  MSGPACK_DEFINE(MSGPACK_BASE(CommandBase), address);
+} ConnectMsg;
+
+void setup_rtc() {
+   if (! rtc.begin()) {
+      Serial.println("Couldn't find RTC");
+      while (1);
+    }
+  
+    if (rtc.lostPower()) {
+      Serial.println("RTC lost power, lets set the time!");
+      rtc.adjust(DateTime(2022, 5, 5, 15,43,0));
+    }
+}
+
 
 void setup() {
-    radio.begin();
-//    radio.openWritingPipe(addresses[0]); // 00001
-//    radio.openReadingPipe(1,addresses[1]); // 00002
+    Serial.begin(9600);
 
-    radio.openWritingPipe(0xE8E8F0F0E1LL);
+    setup_rtc();
+    
+    radio.begin();
+    radio.openWritingPipe(EDGE_NRF_ADDRESS);
     radio.setChannel(0x77);    
     radio.setPALevel(RF24_PA_MIN);
     radio.enableDynamicPayloads();
+    radio.openReadingPipe(1, DEVICE_NRF_ADDRESS);
+    radio.stopListening();
+
+     ConnectMsg c;
+     c.command_id = COMMAND_CONNECT;
+     c.address = 0xE6E6F0F0E1;
     
-    Serial.begin(9600);
+    // Connect Message
+    MsgPack::Packer packer;
+    packer.serialize(c);
+
+    
+    // Sending data
+    radio.write(packer.data(), packer.size());
+    
+    Serial.println("CONNECT message sent");
+    
+    radio.startListening();
+    
+    while ( ! radio.available() ){
+      Serial.println("Receiving");
+      delay(1000);
+    }
+    
+    Serial.print("Recieved Something");
+    
+    String responseMsg;
+    radio.read(&responseMsg, sizeof(responseMsg));
+    Serial.print("Response Message :");
+    Serial.println(responseMsg);
+    Serial.print("\n");
+    
+    radio.stopListening();
+
+    while(1);
 
     pinMode(rd_apin, INPUT);
     pinMode(ldr_apin, INPUT);
     pinMode(dht_dpin, INPUT);
     
     EnTempSensor.begin();
+    
 }
                                                     
 void loop() {
 
-  struct PanelStat PSone;
-  
-  
-  PSone.PanelVoltage = int(VoltageSensor()*100);
-  PSone.PanelAmpere = int(CurrentSensor()*100);
-  PSone.Raindrop = RaindropSensor();
-  PSone.PanelLDR = PanelLDRSensor();
-  PSone.PanelTemp = DHTSensorTemperature();
-  PSone.PanelHumi = DHTSensorHumidity();
-  PSone.Temperature = int(DSTemperatureSensor()*100);
-  
+  PanelArrayStat stat;
 
-  radio.stopListening();
-  
+  PanelNumber id;
+  id.x = 0;
+  id.y = 1;
+
+  Panel p1;
+  p1.id = id;
+  p1.volt = int(VoltageSensor()*100);
+  p1.amp = int(CurrentSensor()*100);
+  p1.ldr = PanelLDRSensor();
+  p1.temp = DHTSensorTemperature();
+
   Serial.println("Panel Stat One Values are :");
-  Serial.print(PSone.PanelVoltage);
+  Serial.print(p1.volt);
   Serial.print(" , ");
-  Serial.print(PSone.PanelAmpere);
+  Serial.print(p1.amp);
   Serial.print(" , ");
-  Serial.print(PSone.Raindrop);
+  Serial.print(p1.ldr);
   Serial.print(" , ");
-  Serial.print(PSone.PanelLDR);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelTemp);
-  Serial.print(" , ");
-  Serial.print(PSone.PanelHumi);
-  Serial.print(" , ");
-  Serial.println(PSone.Temperature);
+  Serial.print(p1.temp);
+
+  MsgPack::arr_t<Panel> panels;
+  panels.push_back(p1);
+  PanelNumber id2;
+  
+  id2.x = 0;
+  id2.y = 0;
+  p1.id = id2;
+  
+//  panels.push_back(p1);
+
+  EnvironmentStat env;
+  env.temp = int(DSTemperatureSensor()*100);;
+  env.humid = DHTSensorHumidity();
+  env.raindop = RaindropSensor();
+
+  stat.session = 1;
+  stat.panels = panels;
+  stat.envStat  =  env;
+  DateTime now = rtc.now();
+  stat.timestamp = now.unixtime();
+  
+  radio.stopListening(); // Stop listening so that we can start writing
   
   MsgPack::Packer packer;
-  packer.serialize(PSone);
+  packer.serialize(stat);
   
   // Sending data
   radio.write(packer.data(), packer.size());
 
-  Serial.print("Payload Size: ");
+  Serial.print("\nPayload Size: ");
   Serial.println(packer.size());
 
 //  unsigned long start_time = micros();      
@@ -146,8 +254,8 @@ void loop() {
 //  }
 
   //Start listening to get data
-  radio.startListening();
-
+//  radio.startListening();
+//
 //  unsigned long started_waiting_at = micros();               // Set up a timeout period, get the current microseconds
 //  boolean timeout = false;                                   // Set up a variable to indicate if a response was received or not
 //
